@@ -20,25 +20,18 @@ def mobius_transform(eigvals, a=1.0, b=0.0, c=1.0, d=1.0):
     """
     return (a * eigvals + b) / (c * eigvals + d + 1e-8)
 
-def mobius_sensitivity(returns, macro_factor, epsilon=0.01):
+def mobius_sensitivity(returns_df, macro_factor, epsilon=0.01):
     """
     Compute sensitivity of the transformed spectral norm to macro factor.
+    returns_df: DataFrame of returns for all ETFs in the universe (T x n)
     """
+    if returns_df.shape[1] < 2:
+        return {ticker: 0.0 for ticker in returns_df.columns}
     # Compute correlation matrix
-    corr = returns.corr().values
+    corr = returns_df.corr().values
     eigvals, _ = np.linalg.eigh(corr)
     eigvals = np.maximum(eigvals, 0)  # ensure non-negative
-    # Baseline Möbius transform
-    transformed = mobius_transform(eigvals)
-    spectral_norm_base = np.max(transformed)
-    # Perturb macro factor
-    macro_plus = min(1.0, macro_factor + epsilon)
-    macro_minus = max(0.0, macro_factor - epsilon)
-    # For perturbation, we need to adjust correlation matrix? 
-    # We'll use a simplified approach: the Möbius parameter a,b,c,d are functions of macro.
-    # We'll vary the transformation parameter directly.
-    # Simpler: we adjust the "c" parameter as a function of macro.
-    # c = 1 + macro_factor (so higher macro -> more aggressive transform)
+    # Define function to compute transformed spectral norm given c parameter
     def transformed_norm(c_param):
         eig_trans = mobius_transform(eigvals, a=1.0, b=0.0, c=c_param, d=1.0)
         return np.max(eig_trans)
@@ -46,10 +39,24 @@ def mobius_sensitivity(returns, macro_factor, epsilon=0.01):
     c_base = 1.0 + macro_factor
     spectral_base = transformed_norm(c_base)
     # Perturbed macro
+    macro_plus = min(1.0, macro_factor + epsilon)
+    macro_minus = max(0.0, macro_factor - epsilon)
     c_plus = 1.0 + macro_plus
     c_minus = 1.0 + macro_minus
     spectral_plus = transformed_norm(c_plus)
     spectral_minus = transformed_norm(c_minus)
     # Derivative
     derivative = (spectral_plus - spectral_minus) / (macro_plus - macro_minus)
-    return derivative
+    # Per-ETF score: we assign the derivative to all ETFs (since it's a global metric)
+    # To get per-ETF variation, we can compute each ETF's contribution to the spectral norm
+    # using the eigenvector components.
+    # Compute per-ETF contribution to the largest eigenvalue
+    eigvals, eigvecs = np.linalg.eigh(corr)
+    max_idx = np.argmax(eigvals)
+    max_eigvec = eigvecs[:, max_idx]
+    # Per-ETF contribution to the spectral norm = squared eigenvector component
+    per_etf_contrib = max_eigvec ** 2
+    # Scale by derivative to get per-ETF sensitivity
+    sensitivity = derivative * per_etf_contrib
+    tickers = returns_df.columns
+    return {tickers[i]: float(sensitivity[i]) for i in range(len(tickers))}
