@@ -32,17 +32,8 @@ def run_for_window(returns, macro_df, window_days):
     # Compute macro factor for the window
     macro_factor_series = compute_macro_factor(macro_window)
     current_macro = macro_factor_series[-1]
-    # Compute sensitivity
-    raw_scores = {}
-    for ticker in ret_window.columns:
-        s = mobius_sensitivity(
-            ret_window[ticker],
-            current_macro,
-            epsilon=config.MOBIUS_EPSILON
-        )
-        if not np.isfinite(s):
-            s = 0.0
-        raw_scores[ticker] = float(s)
+    # Compute sensitivity for all ETFs at once (global metric)
+    raw_scores = mobius_sensitivity(ret_window, current_macro, epsilon=config.MOBIUS_EPSILON)
     norm_scores = normalize_scores(raw_scores)
     sorted_norm = sorted(norm_scores.items(), key=lambda x: x[1], reverse=True)
     top_etfs = [{"ticker": t, "mobius_score_norm": s, "raw_score": raw_scores[t]} for t, s in sorted_norm[:config.TOP_N]]
